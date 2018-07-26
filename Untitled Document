@@ -1,0 +1,628 @@
+// ---------------------------------------------------------------------------
+// GLOBAL DEFINES
+#define F_CPU 16000000L // run CPU at 16 MHz
+#define LED 5 // Boarduino LED on PB5
+#define ClearBit(x,y) x &= ~_BV(y) // equivalent to cbi(x,y)
+#define SetBit(x,y) x |= _BV(y) // equivalent to sbi(x,y)
+#define D4 eS_PORTD4
+#define D5 eS_PORTD5
+#define D6 eS_PORTD6
+#define D7 eS_PORTD7
+#define RS eS_PORTC6
+#define EN eS_PORTC7
+// ---------------------------------------------------------------------------
+// INCLUDES
+#include <avr/io.h>
+#include <util/delay.h>
+#include <string.h>
+#include <stdlib.h>
+#include "lcd.c"
+#include "rtc.c"
+// ---------------------------------------------------------------------------
+// TYPEDEFS
+typedef uint8_t byte;
+typedef int8_t sbyte;
+// ---------------------------------------------------------------------------
+// MISC ROUTINES
+void MainLoop();
+void GetKeyPressed();
+void setalarmstart();
+void getkeypressed2();
+//FILE *fp;
+struct Time{
+int h1;
+int h2;
+int min1;
+int min2;
+
+};
+
+struct Time time1={0,0,0,0};
+struct Time currentAlarm;//={0,0,0,0};
+struct Time arraytime[4];
+int cursorpoint;
+int noofalarm=0;
+int whichis;
+int flagOfSettingAlarm=0;
+int modechange=0;//0 for time show ,1 for setalarm
+
+void InitAVR()
+{
+DDRB = 0x3F;
+DDRC = 0x00;
+DDRD=0xFF;
+}
+ void settingCurrentAlarm()
+ {
+
+                              int minH=arraytime[0].h2+(arraytime[0].h1*10);
+                              whichis=0;
+				int i;
+                              for(i=0;i<noofalarm;i++)
+                              {
+                                int hour=arraytime[i].h2+(arraytime[i].h1*10);
+                                if(hour<minH)
+                                {
+                                  minH=hour;
+                                  whichis=i;
+                                }
+                              }
+                              int minM=arraytime[whichis].min2+(arraytime[whichis].min1*10);
+
+                              for( i=0;i<noofalarm;i++)
+                              {
+                                  int min=arraytime[i].min2+(arraytime[i].min1*10);
+                                  int hour=arraytime[i].h2+(arraytime[i].h1*10);
+                                  if(i!=whichis && hour==minH && min<minM)
+                                  {
+                                    minM=min;
+                                    whichis=i;
+
+                                  }
+                              }
+                              currentAlarm.h1=arraytime[whichis].h1;
+                              currentAlarm.h2=arraytime[whichis].h2;
+                              currentAlarm.min1=arraytime[whichis].min1;
+                              currentAlarm.min2=arraytime[whichis].min2;
+
+
+ }
+void GetKeyPressed()
+   {
+      int r,c;
+
+      PORTA|= 0X0F;
+      //LCD_Line(1);
+      for(c=0;c<4;c++)
+      {
+         DDRA&=~(0XFF);
+
+         DDRA|=(0X80>>c);
+        // LCD_Integer (c);
+         for(r=0;r<4;r++)
+         {
+            if(!(PINA & (0X08>>r)))
+            {
+		      if(c==0)
+                  {
+                    if(r==0 && cursorpoint==8) //"A"
+                      {
+                         LCD_String("DONE");
+                         cursorpoint=0;
+                         arraytime[noofalarm-1]=time1;
+		                    _delay_ms(50);
+                        LCD_Clear() ;
+                        LCD_Integer (noofalarm);
+                        LCD_Goto(2,0);
+
+                        LCD_String("HH:MM");
+                        LCD_Goto(8,0);//2st arg detemines which line,1st arg determines position in that line
+
+                        LCD_String("S");
+                        LCD_Goto(cursorpoint,0);
+                      }
+                    else if(r==1) //"B"
+                      {
+                          LCD_Clear();
+                         LCD_String("Alarms:");
+			//LCD_Line(1);
+                        LCD_Integer(arraytime[0].h1);
+                        LCD_Integer(arraytime[0].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[0].min1);
+                        LCD_Integer(arraytime[0].min2);
+			LCD_Line(1);int i;
+			for(i=1;i<noofalarm;i++)
+                         {
+                        LCD_Integer(arraytime[i].h1);
+                        LCD_Integer(arraytime[i].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[i].min1);
+                        LCD_Integer(arraytime[i].min2);
+			LCD_String(" ");
+			}
+                         
+
+
+
+                      }
+                    else if(r==2) //"C"
+                      {
+                       //if(modechange==1)
+                         //{
+                           modechange=0;
+                           LCD_Clear();
+  				settingCurrentAlarm();
+                           MainLoop();
+                         // }
+
+                      // LCD_String("C");
+                     }
+                    else if(r==3) //"D"
+                        {
+                          LCD_Clear();
+
+
+                        }
+                  }
+                else if(r==3 && c==3)  //"#"
+                  {
+                    if(cursorpoint==0 || cursorpoint==3 || cursorpoint==6) cursorpoint=cursorpoint+2;
+                     else cursorpoint++;//going forward;
+                    if(cursorpoint==9) cursorpoint=0;
+
+                    LCD_Goto(cursorpoint,0);
+
+                  }
+                  else if(r==3 && c==1) //"*"
+                  {
+                   if(cursorpoint==2 || cursorpoint==5 || cursorpoint==8) cursorpoint=cursorpoint-2;
+                   else  cursorpoint--;//going backward;
+                    if(cursorpoint==-1) cursorpoint=8;
+                    LCD_Goto(cursorpoint,0);
+
+                  }
+                else if(r*3+c==0x0b)
+                  {
+                    if(cursorpoint==8 || cursorpoint==0){//nothing
+                     }
+                    else
+                      {
+                        if(cursorpoint==2) time1.h1=0;//saving data to time array
+                        else if(cursorpoint==3) time1.h2=0;
+                        else if(cursorpoint==5) time1.min1=0;
+                        else if(cursorpoint==6) time1.min2=0;
+
+                         LCD_Integer (0);
+                         if(cursorpoint==0 || cursorpoint==3 || cursorpoint==6) cursorpoint=cursorpoint+2;
+                         else cursorpoint++;//going forward;
+                         LCD_Goto(cursorpoint,0);
+                       }
+
+
+                  }
+                else
+                 {
+                    if(cursorpoint==8){//nothing
+                    }
+                    else if(cursorpoint==0 && r==0 && c==1) {
+			noofalarm++;
+			if(noofalarm==4)
+				{LCD_Clear();
+				LCD_String("Already 3 alarms are set!");
+				noofalarm--;
+				}
+			else{
+			LCD_Integer (noofalarm);cursorpoint=cursorpoint+2;LCD_Goto(cursorpoint,0);}}
+                    else if(cursorpoint==0 && (r!=0 || c!=1)) {} //ekhane ki holo?
+                    else
+                    {
+                        if(cursorpoint==2) time1.h1=r*3+c;//saving data to time array
+                        else if(cursorpoint==3) time1.h2=r*3+c;
+                        else if(cursorpoint==5) time1.min1=r*3+c;
+                        else if(cursorpoint==6) time1.min2=r*3+c;
+
+                         LCD_Integer (r*3+c);
+                         if(cursorpoint==0 || cursorpoint==3 || cursorpoint==6) cursorpoint=cursorpoint+2;
+                         else cursorpoint++;//going forward;
+                         LCD_Goto(cursorpoint,0);
+                   }
+
+                  }
+		_delay_ms(20);
+            }
+         }
+      }
+
+      //return 0xFF;//Indicate No key pressed
+   }
+
+
+void setalarmstart()
+{
+       //LCD_Integer (modechange);
+       //_delay_ms(20);
+       LCD_Clear();
+       LCD_Goto(0,0);
+
+      LCD_String("#");
+      LCD_Goto(2,0);
+
+      LCD_String("HH:MM");
+      LCD_Goto(8,0);//2st arg detemines which line,1st arg determines position in that line
+
+     LCD_String("S");
+      int key;
+      cursorpoint=0;
+      //noofalarm=0;
+      LCD_Goto(cursorpoint,0);
+      while(1)
+      {
+         GetKeyPressed(); //Get the keycode of pressed key
+
+      }
+}
+void getkeypressed3()
+{
+     int r,c;
+
+      PORTA|= 0X0F;
+      //LCD_Line(1);
+      for(c=0;c<4;c++)
+      {
+         DDRA&=~(0XFF);
+
+         DDRA|=(0X80>>c);
+        // LCD_Integer (c);
+         for(r=0;r<4;r++)
+         {
+            if(!(PINA & (0X08>>r)))
+            {
+		if(c==0)
+                  {
+                    if(r==0 && cursorpoint==8)
+                      {
+
+                      }
+                    else if(r==1) {
+                        LCD_Clear();
+                         LCD_String("Alarms:");
+			//LCD_Line(1);
+                        LCD_Integer(arraytime[0].h1);
+                        LCD_Integer(arraytime[0].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[0].min1);
+                        LCD_Integer(arraytime[0].min2);
+			LCD_Line(1);int i;
+			for(i=1;i<noofalarm;i++)
+                         {
+                        LCD_Integer(arraytime[i].h1);
+                        LCD_Integer(arraytime[i].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[i].min1);
+                        LCD_Integer(arraytime[i].min2);
+			LCD_String(" ");
+
+			}
+			} //LCD_String("B");
+                    else if(r==2)
+                      {
+                       //if(modechange==0)
+                         //{
+                            modechange=1;
+                            setalarmstart();
+
+                          //}
+
+                      // LCD_String("C");
+                     }
+                    else if(r==3)  {}//LCD_String("D");
+                  }
+
+                else if(r*3+c==0x0b)
+                  {
+
+                  }
+                else
+                 {  
+                     int val=r*3+c;
+                     int h1,h2,min1,min2;
+			h1=arraytime[val-1].h1;
+			h2=arraytime[val-1].h2;
+			min1=arraytime[val-1].min1;
+			min2=arraytime[val-1].min2;
+                     if(h1|| h2|| min1 ||min2)
+			{
+ 				 int i;
+				for(i=val-1;i<noofalarm;i++)
+					{
+  					 arraytime[i].h1=arraytime[i+1].h1;
+					  arraytime[i].h2=arraytime[i+1].h2;
+
+  					arraytime[i].min1=arraytime[i+1].min1;
+		
+					 arraytime[i].min2=arraytime[i+1].min2;
+
+
+					}
+			}
+
+			
+                  }
+		_delay_ms(20);
+            }
+         }
+      }
+
+}
+void getkeypressed2()
+{
+     int r,c;
+
+      PORTA|= 0X0F;
+      //LCD_Line(1);
+      for(c=0;c<4;c++)
+      {
+         DDRA&=~(0XFF);
+
+         DDRA|=(0X80>>c);
+        // LCD_Integer (c);
+         for(r=0;r<4;r++)
+         {
+            if(!(PINA & (0X08>>r)))
+            {
+		if(c==0)
+                  {
+                    if(r==0 && cursorpoint==8)
+                      {
+
+                      }
+                    else if(r==1) {
+                        /*LCD_Clear();
+                         LCD_String("Alarms:");
+			//LCD_Line(1);
+                        LCD_Integer(arraytime[0].h1);
+                        LCD_Integer(arraytime[0].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[0].min1);
+                        LCD_Integer(arraytime[0].min2);
+			LCD_Line(1);int i;
+			for(i=1;i<noofalarm;i++)
+                         {
+                        LCD_Integer(arraytime[i].h1);
+                        LCD_Integer(arraytime[i].h2);
+                         LCD_String(":");
+                        LCD_Integer(arraytime[i].min1);
+                        LCD_Integer(arraytime[i].min2);
+			LCD_String(" ");
+			}
+
+			} //LCD_String("B");*/
+                    else if(r==2)
+                      {
+                       //if(modechange==0)
+                         //{
+                            modechange=1;
+                            setalarmstart();
+
+                          //}
+
+                      // LCD_String("C");
+                     }
+                    else if(r==3)  {}//LCD_String("D");
+                  }
+
+                else if(r*3+c==0x0b)
+                  {
+
+                  }
+                else
+                 {
+
+                  }
+		_delay_ms(20);
+            }
+         }
+      }
+
+}
+
+void FlashLED()
+{
+SetBit(PORTB,LED);
+msDelay(250);
+ClearBit(PORTB,LED);
+msDelay(250);
+}
+
+
+
+
+void ShowDevices()
+// Scan I2C addresses and display addresses of all devices found
+{
+LCD_Line(1); LCD_String("Found:");
+byte addr = 1;
+while (addr>0)
+{
+LCD_Char(' ');
+addr = I2C_FindDevice(addr);
+if (addr>0) LCD_Hex(addr++);
+}
+}
+
+
+
+void LCD_TwoDigits(byte data)
+// helper function for WriteDate()
+// input is two digits in BCD format
+// output is to LCD display at current cursor position
+{
+//char c;
+byte temp = data>>4;
+LCD_Char(temp+'0');
+//c=temp+'0';
+data &= 0x0F;
+LCD_Char(data+'0');
+//c+=data+'0';
+//int k=(int)c;
+}
+
+
+
+
+void WriteDate()
+{
+byte months, days, years;
+DS1307_GetDate(&months,&days,&years);
+LCD_TwoDigits(months);
+LCD_Char('/');
+LCD_TwoDigits(days);
+LCD_Char('/');
+LCD_TwoDigits(years);
+}
+
+
+
+
+void WriteTime()
+{
+byte hours, minutes, seconds;
+DS1307_GetTime(&hours,&minutes,&seconds);
+LCD_TwoDigits(hours);
+LCD_Char(':');
+LCD_TwoDigits(minutes);
+LCD_Char(':');
+LCD_TwoDigits(seconds);
+
+LCD_Char(' ');
+byte hour=currentAlarm.h2+(currentAlarm.h1*10);
+byte min=currentAlarm.min2+(currentAlarm.min1*10);
+
+//LCD_Integer(hour);
+//LCD_Integer(min);
+
+byte tempHour,tempMin,tempSec;
+tempHour=hours;
+tempMin=minutes;
+tempSec=seconds;
+byte h,m;
+char c; byte temp;
+ temp= tempHour>>4;
+c=temp+'0';
+h=temp*10;
+tempHour &= 0x0F;
+c+=tempHour+'0';
+h+=tempHour;
+
+//byte h=(byte)c-60-3*9;
+
+temp= tempMin>>4;
+c=temp+'0';
+m=temp*10;
+tempMin &= 0x0F;
+c+=tempMin+'0';
+m+=tempMin;
+//byte m=(byte)c-60-9*2;
+
+//LCD_Integer(h);
+//LCD_Integer(m);
+if(h==hour && m==min)
+{ 
+
+
+if(!flagOfSettingAlarm)
+{ 
+ int i;
+for(i=whichis;i<noofalarm;i++)
+{
+   arraytime[i].h1=arraytime[i+1].h1;
+  arraytime[i].h2=arraytime[i+1].h2;
+
+  arraytime[i].min1=arraytime[i+1].min1;
+
+  arraytime[i].min2=arraytime[i+1].min2;
+
+
+}
+noofalarm--;
+flagOfSettingAlarm=1;
+//settingCurrentAlarm();
+}
+PORTD=0b01000000;
+}
+else
+{
+flagOfSettingAlarm=0;
+settingCurrentAlarm();
+PORTD=0x0;
+}
+
+}
+
+
+
+
+void LCD_TimeDate()
+{
+LCD_Line(0); WriteTime();
+//LCD_Line(1); WriteDate();
+}
+//
+//
+//---------------------------------------------------------------------------
+///PROGRAM LOOP
+
+
+
+void MainLoop()
+{
+while(1)
+{
+LCD_Line(0);
+
+LCD_TimeDate();
+
+LCD_Line(1);
+//LCD_Integer (1);
+//LCD_String("current alarm: ");
+LCD_Integer(currentAlarm.h1);
+LCD_Integer(currentAlarm.h2);
+LCD_String(":");
+LCD_Integer(currentAlarm.min1);
+LCD_Integer(currentAlarm.min2);
+
+getkeypressed2();
+
+}
+}
+
+// ---------------------------------------------------------------------------
+// MAIN PROGRAM
+int main(void)
+{
+
+// InitAVR();
+//       //Wait for LCD To Start
+// 	LCD_Init();
+//       //_delay_loop_2(0);
+// 	_delay_ms(50);
+// setalarmstart();
+//
+//
+//
+
+
+
+InitAVR(); // set port direction
+LCD_Init();
+I2C_Init();
+LCD_String("Ready.");
+ShowDevices(); // show that I2C is working OK
+msDelay(50);
+LCD_Clear();
+//Lcd4_Clear();
+//SetTimeDate();
+MainLoop(); // display time
+
+}
